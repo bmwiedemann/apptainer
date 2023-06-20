@@ -126,9 +126,13 @@ func New(r io.Reader, name string, args []string, envs []string, runnerOptions .
 		dir = "/"
 	}
 
+	execHandler := func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+		return s.internalExecHandler()
+	}
+
 	opts := []interp.RunnerOption{
 		interp.StdIO(os.Stdin, os.Stdout, os.Stderr),
-		interp.ExecHandler(s.internalExecHandler()),
+		interp.ExecHandlers(execHandler),
 		interp.OpenHandler(s.internalOpenHandler()),
 		interp.Params("--"),
 		interp.Env(expand.ListEnviron(envs...)),
@@ -293,20 +297,22 @@ func EvaluateEnv(ctx context.Context, script []byte, args []string, envs []strin
 	var env []string
 
 	// disable command execution and just handle stop builtin
-	execHandler := func(ctx context.Context, args []string) error {
-		if args[0] == stopBuiltin {
-			env = GetEnv(interp.HandlerCtx(ctx))
-			return nil
+	execHandler := func(next interp.ExecHandlerFunc) interp.ExecHandlerFunc {
+		return func(ctx context.Context, args []string) error {
+			if args[0] == stopBuiltin {
+				env = GetEnv(interp.HandlerCtx(ctx))
+				return nil
+			}
+			c := strings.Join(args, " ")
+			return fmt.Errorf("could not execute %q: execution is disabled", c)
 		}
-		c := strings.Join(args, " ")
-		return fmt.Errorf("could not execute %q: execution is disabled", c)
 	}
 	openHandler := func(ctx context.Context, path string, flag int, perm os.FileMode) (io.ReadWriteCloser, error) {
 		return nil, fmt.Errorf("could not open/create/modify %q: file feature is disabled", path)
 	}
 
 	opts := []interp.RunnerOption{
-		interp.ExecHandler(execHandler),
+		interp.ExecHandlers(execHandler),
 		interp.OpenHandler(openHandler),
 		interp.Env(newNonExportedEnv(envs)),
 	}
